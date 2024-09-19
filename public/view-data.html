@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>View Data</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        uber: {
+                            black: '#000000',
+                            white: '#FFFFFF',
+                            gray: '#F1F1F1',
+                            blue: '#276EF1',
+                        },
+                    },
+                    fontFamily: {
+                        sans: ['Poppins', 'sans-serif'],
+                    },
+                },
+            },
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-uber-white dark:bg-uber-black text-uber-black dark:text-uber-white transition-colors duration-200">
+    <div class="container mx-auto p-4">
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-4xl font-semibold">View Data</h1>
+            <button onclick="toggleDarkMode()" class="bg-uber-gray dark:bg-uber-blue text-uber-black dark:text-uber-white px-4 py-2 rounded-full transition-colors duration-200">
+                Toggle Theme
+            </button>
+        </div>
+        <div class="mb-8">
+            <input type="text" id="apiKey" placeholder="Enter API Key" class="p-2 border rounded-md dark:bg-uber-gray dark:text-uber-black w-64 mr-2">
+            <button onclick="fetchData()" class="bg-uber-blue text-uber-white px-4 py-2 rounded-md transition-colors duration-200 hover:bg-opacity-80">Fetch Data</button>
+        </div>
+        <div id="expirationTimer" class="mb-4 text-lg font-semibold"></div>
+        <div id="usageStats" class="mb-4 text-lg"></div>
+        <div id="dataDisplay" class="bg-uber-gray dark:bg-uber-black border border-uber-black dark:border-uber-white p-4 rounded-md shadow transition-colors duration-200"></div>
+    </div>
+
+    <script>
+        const socket = io();
+        let expirationInterval;
+        let currentApiKey;
+
+        function fetchData() {
+            currentApiKey = document.getElementById('apiKey').value;
+            fetch('/data', {
+                headers: { 'X-API-Key': currentApiKey }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('API key is invalid or expired');
+                }
+                return response.json();
+            })
+            .then(result => {
+                displayData(result.data);
+                startExpirationTimer(result.expiresAt);
+                updateUsageStats(result.usage);
+            })
+            .catch(error => {
+                document.getElementById('dataDisplay').innerHTML = `<p class="text-red-500">${error.message}</p>`;
+                document.getElementById('expirationTimer').textContent = '';
+                document.getElementById('usageStats').textContent = '';
+                clearInterval(expirationInterval);
+            });
+        }
+
+        function displayData(data) {
+            const dataDisplay = document.getElementById('dataDisplay');
+            dataDisplay.innerHTML = '<h2 class="text-2xl font-semibold mb-4">Sample Data:</h2>';
+            data.forEach(item => {
+                dataDisplay.innerHTML += `
+                    <div class="mb-4 p-4 bg-uber-white dark:bg-uber-black border border-uber-black dark:border-uber-white rounded-md">
+                        <p class="mb-2"><strong>ID:</strong> ${item.id}</p>
+                        <p class="mb-2"><strong>Name:</strong> ${item.name}</p>
+                        <p><strong>Description:</strong> ${item.description}</p>
+                    </div>
+                `;
+            });
+        }
+
+        function startExpirationTimer(expiresAt) {
+            clearInterval(expirationInterval);
+            const timerDisplay = document.getElementById('expirationTimer');
+
+            expirationInterval = setInterval(() => {
+                const remainingTime = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+                timerDisplay.textContent = `API Key expires in: ${remainingTime} seconds`;
+
+                if (remainingTime <= 0) {
+                    clearInterval(expirationInterval);
+                    document.getElementById('dataDisplay').innerHTML = '<p class="text-red-500">API key has expired. Please use a new key.</p>';
+                    timerDisplay.textContent = '';
+                    document.getElementById('usageStats').textContent = '';
+                }
+            }, 1000);
+        }
+
+        function updateUsageStats(usage) {
+            const usageDisplay = document.getElementById('usageStats');
+            usageDisplay.textContent = `API Key Usage: ${usage} requests`;
+        }
+
+        function toggleDarkMode() {
+            document.documentElement.classList.toggle('dark');
+        }
+
+        socket.on('apiKeyUpdate', (data) => {
+            if (data.type === 'revoke' && data.key === currentApiKey) {
+                document.getElementById('dataDisplay').innerHTML = '<p class="text-red-500">This API key has been revoked.</p>';
+                document.getElementById('expirationTimer').textContent = '';
+                document.getElementById('usageStats').textContent = '';
+                clearInterval(expirationInterval);
+            } else if (data.type === 'extend' && data.key === currentApiKey) {
+                startExpirationTimer(data.expiresAt);
+            }
+        });
+    </script>
+</body>
+</html>
