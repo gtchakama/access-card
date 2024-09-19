@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Key Management</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        uber: {
+                            black: '#000000',
+                            white: '#FFFFFF',
+                            gray: '#F1F1F1',
+                            blue: '#276EF1',
+                        },
+                    },
+                    fontFamily: {
+                        sans: ['Poppins', 'sans-serif'],
+                    },
+                },
+            },
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-uber-white dark:bg-uber-black text-uber-black dark:text-uber-white transition-colors duration-200">
+    <div class="container mx-auto p-4">
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-4xl font-semibold">API Key Management</h1>
+            <button onclick="toggleDarkMode()" class="bg-uber-gray dark:bg-uber-blue text-uber-black dark:text-uber-white px-4 py-2 rounded-full transition-colors duration-200">
+                Toggle Theme
+            </button>
+        </div>
+        <div class="mb-8">
+            <input type="text" id="keyName" placeholder="API Key Name" class="p-2 border rounded-md dark:bg-uber-gray dark:text-uber-black w-64 mr-2">
+            <button onclick="generateKey()" class="bg-uber-blue text-uber-white px-4 py-2 rounded-md transition-colors duration-200 hover:bg-opacity-80">Generate API Key</button>
+        </div>
+        <div id="keyList" class="space-y-4"></div>
+        <div class="mt-12">
+            <h2 class="text-2xl font-semibold mb-4">API Usage Chart</h2>
+            <canvas id="apiUsageChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let chart;
+        let apiKeys = [];
+
+        function generateKey() {
+            const name = document.getElementById('keyName').value;
+            fetch('/generate-key', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('keyName').value = '';
+            });
+        }
+
+        function updateKeyList() {
+            const keyList = document.getElementById('keyList');
+            keyList.innerHTML = '';
+            apiKeys.forEach(key => {
+                const expiresIn = Math.max(0, Math.floor((key.expiresAt - Date.now()) / 1000));
+                const div = document.createElement('div');
+                div.className = 'bg-uber-gray dark:bg-uber-black border border-uber-black dark:border-uber-white p-4 rounded-md shadow transition-colors duration-200';
+                div.innerHTML = `
+                    <p class="mb-2"><strong>Name:</strong> ${key.name}</p>
+                    <p class="mb-2"><strong>Key:</strong> ${key.key}</p>
+                    <p class="mb-2"><strong>Expires in:</strong> <span class="expireTime" data-expires-at="${key.expiresAt}">${expiresIn}</span> seconds</p>
+                    <p class="mb-4"><strong>Usage:</strong> ${key.usage} requests</p>
+                    <button onclick="revokeKey('${key.key}')" class="bg-red-500 text-uber-white px-3 py-1 rounded-md mr-2 transition-colors duration-200 hover:bg-opacity-80">Revoke</button>
+                    <button onclick="extendKey('${key.key}')" class="bg-green-500 text-uber-white px-3 py-1 rounded-md transition-colors duration-200 hover:bg-opacity-80">Extend (5 min)</button>
+                `;
+                keyList.appendChild(div);
+            });
+            updateChart();
+        }
+
+        function revokeKey(apiKey) {
+            fetch('/revoke-key', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ apiKey })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    fetchApiKeys();
+                }
+            });
+        }
+
+        function extendKey(apiKey) {
+            fetch('/extend-key', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ apiKey, extensionTime: 5 * 60 * 1000 })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    fetchApiKeys();
+                }
+            });
+        }
+
+        function updateChart() {
+            const ctx = document.getElementById('apiUsageChart').getContext('2d');
+            const labels = apiKeys.map(key => key.name);
+            const data = apiKeys.map(key => key.usage);
+
+            if (chart) {
+                chart.data.labels = labels;
+                chart.data.datasets[0].data = data;
+                chart.update();
+            } else {
+                chart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'API Usage',
+                            data: data,
+                            backgroundColor: 'rgba(39, 110, 241, 0.6)',
+                            borderColor: 'rgba(39, 110, 241, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        },
+                        responsive: true,
+                        animation: {
+                            duration: 500
+                        },
+                        plugins: {
+                            legend: {
+                                labels: {
+                                    color: document.documentElement.classList.contains('dark') ? '#FFFFFF' : '#000000'
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        function toggleDarkMode() {
+            document.documentElement.classList.toggle('dark');
+            if (chart) {
+                chart.options.plugins.legend.labels.color = document.documentElement.classList.contains('dark') ? '#FFFFFF' : '#000000';
+                chart.update();
+            }
+        }
+
+        function updateExpirationTimers() {
+            document.querySelectorAll('.expireTime').forEach(span => {
+                const expiresAt = parseInt(span.dataset.expiresAt);
+                const remainingTime = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+                span.textContent = remainingTime;
+            });
+        }
+
+        function fetchApiKeys() {
+            fetch('/api-keys')
+            .then(response => response.json())
+            .then(keys => {
+                apiKeys = keys;
+                updateKeyList();
+            });
+        }
+
+        setInterval(updateExpirationTimers, 1000);
+
+        socket.on('apiKeyUpdate', (data) => {
+            fetchApiKeys();
+        });
+
+        socket.on('usageUpdate', (data) => {
+            const updatedKey = apiKeys.find(key => key.key === data.apiKey);
+            if (updatedKey) {
+                updatedKey.usage = data.usage;
+                updateKeyList();
+            }
+        });
+
+        fetchApiKeys();
+    </script>
+</body>
+</html>
